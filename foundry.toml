@@ -6,6 +6,7 @@ optimizer = true
 runs = "400"
 gas-report = ["*"]
 via-ir = true
+remappings = ["@openzeppelin/=lib/openzeppelin-contracts"]
 
 
 # See more config options https://github.com/foundry-rs/foundry/tree/master/config

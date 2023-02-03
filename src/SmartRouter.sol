@@ -2,7 +2,7 @@
 
 import "./interfaces/ISmartPair.sol";
 import "./interfaces/IFactory.sol";
-import "../node_modules/@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract SmartRouter {
     modifier checkDeadline(uint256 deadline) {
@@ -42,6 +42,7 @@ contract SmartRouter {
         IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn);
         ISmartPair pair = ISmartPair(factory.getPair(tokenIn, tokenOut));
         bool _isToken0 = tokenIn == pair.token0();
+        IERC20(tokenIn).approve(address(pair), amountIn);
         uint256 dy = pair.swap(_isToken0, amountIn);
         require(dy >= minAmountOut, "dy<minDy");
         IERC20(tokenOut).transfer(msg.sender, dy);

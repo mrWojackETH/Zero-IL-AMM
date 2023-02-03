@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-import "../node_modules/@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 library utils {
     function sqrt(uint256 y) internal pure returns (uint256 z) {
@@ -93,7 +93,7 @@ contract SmartPair {
         uint256 l = counterOrders.length;
         token.transferFrom(msg.sender, address(this), amount);
 
-        if (reserves == 0 && counterReserves == 0) {
+        if (reserves == 0) {
             _update();
             _mint(msg.sender, token, amount);
             shares = amount;

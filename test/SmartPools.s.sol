@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-import "../node_modules/@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "forge-std/Test.sol";
 import "forge-std/Vm.sol";
 import "../src/SmartRouter.sol";
@@ -10,6 +10,10 @@ import "../src/SmartPair.sol";
 import "../src/mock.sol";
 
 contract SmartPoolTest is Test {
+    address public constant bob = address(0x1);
+    address public constant alice = address(0x2);
+    address public constant jeff = address(0x3);
+
     mockToken[] public tokens;
     Factory public factory;
     SmartRouter public router;
@@ -100,6 +104,7 @@ contract SmartPoolTest is Test {
         SmartPair pair = SmartPair(pAddress);
         tokens[x].approve(address(pair), a);
         assertEq(pair.addLiquidity(true, a), a);
+        emit log_named_uint("Balance : ", tokens[x].balanceOf(address(pair)));
     }
 
     function test_add_liquidity_second(uint256 x, uint256 y, uint256 a) public {
@@ -107,12 +112,18 @@ contract SmartPoolTest is Test {
         vm.assume(x < tokens.length && y < tokens.length);
         vm.assume(a < 2 ** 255 && a > 0);
 
+        vm.startPrank(bob);
+
         tokens[x].mint(a);
         (address pAddress,,) = router.getPair(address(tokens[x]), address(tokens[y]));
         SmartPair pair = SmartPair(pAddress);
         tokens[x].approve(address(pair), a);
         assertEq(pair.addLiquidity(true, a), a);
         assertEq(tokens[x].balanceOf(address(pair)), a);
+
+        vm.stopPrank();
+
+        vm.startPrank(alice);
 
         tokens[x].mint(a);
         tokens[x].approve(address(pair), a);
@@ -122,6 +133,11 @@ contract SmartPoolTest is Test {
         SmartPair.order[] memory orders = pair.orderBook(s);
         assertEq(orders[0].amount, a);
         assertEq(orders[0].fulfilled, 0);
+        emit log_uint(a);
+        emit log_uint(orders[0].amount);
+        emit log_uint(orders[0].fulfilled);
+
+        vm.stopPrank();
     }
 
     function test_fulfill_liquidity_orders(uint256 x, uint256 y, uint256 a) public {
@@ -154,6 +170,48 @@ contract SmartPoolTest is Test {
     }
 
     function test_swap(uint256 a) public {
+        uint256 amount = 500000e18;
+        vm.assume(a < amount && a > 0);
+        mockToken token0 = tokens[5];
+        mockToken token1 = tokens[8];
+
+        //deposit token0 as Bob
+        vm.startPrank(bob);
+        token0.mint(amount);
+        (address pAddress,,) = router.getPair(address(token0), address(token1));
+        token0.approve(pAddress, amount);
+        SmartPair pair = SmartPair(pAddress);
+        pair.addLiquidity(true, amount);
+        vm.stopPrank();
+
+        //deposit token1 as Alice
+
+        vm.startPrank(alice);
+        token1.mint(amount);
+        token1.approve(pAddress, amount);
+        pair.addLiquidity(false, amount);
+        vm.stopPrank();
+
+        //jeff performs a swap
+
+        vm.startPrank(jeff);
+        token0.mint(a);
+        token0.approve(address(router), a);
+        uint256 amountOutAprox = router.getAmountOut(address(token0), address(token1), a);
+        emit log_uint(amountOutAprox);
+        emit log_uint(router.swapSingle(address(token0), address(token1), a, 0, block.timestamp));
+    }
+
+    function test_time_expired() public {
+        mockToken token0 = tokens[5];
+        mockToken token1 = tokens[8];
+        uint256 time = block.timestamp;
+        vm.roll(500);
+        token0.mint(100);
+        token0.approve(address(router), 100);
+        uint256 amountOutAprox = router.getAmountOut(address(token0), address(token1), 100);
+        vm.expectRevert("TIME_EXPIRED");
+        router.swapSingle(address(token0), address(token1), 100, 0, time    );
         
     }
 }
