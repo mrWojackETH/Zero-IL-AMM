@@ -1,0 +1,6 @@
+SmartPoolTest:test_add_liquidity_first(uint256,uint256,uint256) (runs: 256, μ: 134857, ~: 134857)
+SmartPoolTest:test_add_liquidity_second(uint256,uint256,uint256) (runs: 256, μ: 225181, ~: 225181)
+SmartPoolTest:test_fulfill_liquidity_orders(uint256,uint256,uint256) (runs: 256, μ: 385548, ~: 385548)
+SmartPoolTest:test_get_pair(uint256,uint256) (runs: 256, μ: 31639, ~: 31639)
+SmartPoolTest:test_reserves_are_empty() (gas: 28151)
+SmartPoolTest:test_swap(uint256) (runs: 256, μ: 318, ~: 318)
