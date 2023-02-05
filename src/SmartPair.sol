@@ -31,7 +31,7 @@ contract SmartPair {
     IERC20 private _token1;
     uint256 public reserves0;
     uint256 public reserves1;
-    mapping(address => mapping(IERC20 => uint256)) public balances;
+    mapping(address => mapping(IERC20 => uint256)) private _balances;
     mapping(Side => order[]) private orders;
 
     enum Side {
@@ -78,12 +78,19 @@ contract SmartPair {
         uint256 amountInAfterFee = dx * 997 / 1000;
         dy = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
         tokenOut.transfer(msg.sender, dy);
-        _update();
+        if (token0In == true) {
+            reserves0 += dx;
+            reserves1 -= dy;
+        }
+        if (token0In == false) {
+            reserves0 -= dy;
+            reserves1 += dx;
+        }
     }
 
-    function addLiquidity(bool isToken0, uint256 amount) external returns (uint256 shares) {
+    function addLiquidity(bool isToken0, uint256 amount, address to) external returns (uint256 shares) {
         require(amount > 0, "amount=0");
-        (IERC20 token, IERC20 counterToken) = isToken0 ? (_token0, _token1) : (_token1, _token1);
+        (IERC20 token, IERC20 counterToken) = isToken0 ? (_token0, _token1) : (_token1, _token0);
         (uint256 reserves, uint256 counterReserves) = isToken0 ? (reserves0, reserves1) : (reserves1, reserves0);
         (Side side, Side counterSide) =
             (isToken0 ? (Side.DEPOSIT0_REMOVE1, Side.REMOVE0_DEPOSIT1) : (Side.REMOVE0_DEPOSIT1, Side.DEPOSIT0_REMOVE1));
@@ -94,8 +101,7 @@ contract SmartPair {
         token.transferFrom(msg.sender, address(this), amount);
 
         if (reserves == 0) {
-            _update();
-            _mint(msg.sender, token, amount);
+            _mint(to, token, amount);
             shares = amount;
             // CASE HE IS THE FIRST ONE
         } else {
@@ -109,28 +115,29 @@ contract SmartPair {
                         //CASE HE DEPOSITS EVERYTHING
                         break;
                     } else {
+                        _burn(o.investor, token, o.amount - o.fulfilled);
                         orderFulfilled += (o.amount - o.fulfilled);
-                        _burn(o.investor, token, amount - orderFulfilled);
                         counterOrders[i].fulfilled = counterOrders[i].amount;
                         //CASE HE DOESNT
                     }
                 }
 
                 if (o.option == Option.DEPOSIT) {
-                    uint256 amountProportionAdjusted = o.amount * reserves / counterReserves;
-                    uint256 fulfilledProportionAdjusted = o.fulfilled * reserves / counterReserves;
-
-                    if (amountProportionAdjusted - fulfilledProportionAdjusted > amount - orderFulfilled) {
-                        counterOrders[i].fulfilled += amount - orderFulfilled;
-                        _mint(o.investor, counterToken, amount - orderFulfilled);
-                        orderFulfilled = amount;
-                        //CASE HE DEPOSITS EVERYTHING
-                        break;
-                    } else {
-                        orderFulfilled += (amountProportionAdjusted - fulfilledProportionAdjusted);
-                        _mint(o.investor, counterToken, (amount - orderFulfilled));
+                    uint256 counterProportion = (o.amount - o.fulfilled) * reserves;
+                    uint256 userProportion = (amount - orderFulfilled) * counterReserves;
+                    if (counterProportion < userProportion) {
+                        _mint(o.investor, counterToken, o.amount - o.fulfilled);
                         counterOrders[i].fulfilled = o.amount;
-                        //CASE HE DOESNT
+                        uint256 x = counterProportion / counterReserves;
+                        orderFulfilled += x;
+                    } else if (counterProportion > userProportion) {
+                        _mint(o.investor, counterToken, (amount - orderFulfilled));
+                        uint256 y = userProportion / reserves;
+                        counterOrders[i].fulfilled += y;
+                        orderFulfilled = amount;
+                    } else {
+                        _mint(o.investor, counterToken, o.amount - o.fulfilled);
+                        orderFulfilled = amount;
                     }
                 }
 
@@ -138,11 +145,11 @@ contract SmartPair {
             }
 
             shares = orderFulfilled;
-            _mint(msg.sender, token, shares);
+            _mint(to, token, shares);
 
             if (orderFulfilled < amount) {
                 orders[side].push(
-                    order({option: Option.DEPOSIT, investor: msg.sender, amount: amount - orderFulfilled, fulfilled: 0})
+                    order({option: Option.DEPOSIT, investor: to, amount: amount - orderFulfilled, fulfilled: 0})
                 );
             }
 
@@ -152,7 +159,7 @@ contract SmartPair {
 
     function removeLiquidity(bool isToken0, uint256 amount) external returns (uint256 withdraw) {
         (IERC20 token, IERC20 counterToken) = isToken0 ? (_token0, _token1) : (_token1, _token1);
-        require(balances[msg.sender][token] >= amount, "insufficient balance");
+        require(_balances[msg.sender][token] >= amount, "b<amount=0");
         (uint256 reserves, uint256 counterReserves) = isToken0 ? (reserves0, reserves1) : (reserves1, reserves0);
         (Side side, Side counterSide) = (
             !isToken0 ? (Side.DEPOSIT0_REMOVE1, Side.REMOVE0_DEPOSIT1) : (Side.REMOVE0_DEPOSIT1, Side.DEPOSIT0_REMOVE1)
@@ -161,74 +168,94 @@ contract SmartPair {
         uint256 orderFulfilled;
         order[] storage counterOrders = orders[counterSide];
         uint256 l = counterOrders.length;
+        token.transferFrom(msg.sender, address(this), amount);
 
-        for (uint256 i = 0; i < l; i++) {
-            order memory o = counterOrders[i];
-            if (o.option == Option.DEPOSIT) {
-                if (o.amount - o.fulfilled > amount - orderFulfilled) {
-                    counterOrders[i].fulfilled += amount - orderFulfilled;
-                    _mint(o.investor, token, amount - orderFulfilled);
-                    orderFulfilled = amount;
-                    //CASE HE DEPOSITS EVERYTHING
-                    break;
-                } else {
-                    orderFulfilled += (o.amount - o.fulfilled);
-                    _mint(o.investor, token, amount - orderFulfilled);
-                    counterOrders[i].fulfilled = counterOrders[i].amount;
-                    //CASE HE DOESNT
+        if (reserves == 0) {
+            _mint(msg.sender, token, amount);
+            withdraw = amount;
+            // CASE HE IS THE FIRST ONE
+        } else {
+            for (uint256 i = 0; i < l; i++) {
+                order memory o = counterOrders[i];
+                if (o.option == Option.REMOVE) {
+                    if (o.amount - o.fulfilled > amount - orderFulfilled) {
+                        counterOrders[i].fulfilled += amount - orderFulfilled;
+                        _burn(o.investor, token, amount - orderFulfilled);
+                        orderFulfilled = amount;
+                        //CASE HE DEPOSITS EVERYTHING
+                        break;
+                    } else {
+                        _burn(o.investor, token, o.amount - o.fulfilled);
+                        orderFulfilled += (o.amount - o.fulfilled);
+                        counterOrders[i].fulfilled = counterOrders[i].amount;
+                        //CASE HE DOESNT
+                    }
                 }
+
+                if (o.option == Option.DEPOSIT) {
+                    uint256 counterProportion = (o.amount - o.fulfilled) * reserves;
+                    uint256 userProportion = (amount - orderFulfilled) * counterReserves;
+                    if (((o.amount - o.fulfilled) * reserves) < ((amount - orderFulfilled) * counterReserves)) {
+                        _mint(o.investor, counterToken, counterOrders[i].amount - counterOrders[i].fulfilled);
+                        counterOrders[i].fulfilled = counterOrders[i].amount;
+                        uint256 x = counterProportion / counterReserves;
+                        orderFulfilled += x;
+                        break;
+                    } else if (((o.amount - o.fulfilled) * reserves) > ((amount - orderFulfilled) * counterReserves)) {
+                        _mint(o.investor, counterToken, (amount - orderFulfilled));
+                        uint256 y = userProportion / reserves;
+                        counterOrders[i].fulfilled += y;
+                        orderFulfilled = amount;
+                    } else {
+                        _mint(o.investor, counterToken, counterOrders[i].amount - counterOrders[i].fulfilled);
+                        orderFulfilled = amount;
+                        break;
+                    }
+                }
+
+                if (orderFulfilled == amount) break;
             }
 
-            if (o.option == Option.REMOVE) {
-                uint256 amountProportionAdjusted = o.amount * reserves / counterReserves;
-                uint256 fulfilledProportionAdjusted = o.fulfilled * reserves / counterReserves;
+            withdraw = orderFulfilled;
+            _burn(msg.sender, token, withdraw);
 
-                if (amountProportionAdjusted - fulfilledProportionAdjusted > amount - orderFulfilled) {
-                    counterOrders[i].fulfilled += amount - orderFulfilled;
-                    _burn(o.investor, counterToken, amount - orderFulfilled);
-                    orderFulfilled = amount;
-                    //CASE HE DEPOSITS EVERYTHING
-                    break;
-                } else {
-                    orderFulfilled += (amountProportionAdjusted - fulfilledProportionAdjusted);
-                    _burn(o.investor, counterToken, (amount - orderFulfilled));
-                    counterOrders[i].fulfilled = o.amount;
-                    //CASE HE DOESNT
-                }
+            if (orderFulfilled < amount) {
+                orders[side].push(
+                    order({option: Option.REMOVE, investor: msg.sender, amount: amount - orderFulfilled, fulfilled: 0})
+                );
             }
 
-            if (orderFulfilled == amount) break;
+            _cleanUp(counterOrders);
         }
-        withdraw = orderFulfilled;
-        _burn(msg.sender, token, withdraw);
-
-        if (orderFulfilled < amount) {
-            orders[side].push(
-                order({option: Option.REMOVE, investor: msg.sender, amount: amount - orderFulfilled, fulfilled: 0})
-            );
-        }
-
-        _cleanUp(counterOrders);
     }
 
     function orderBook(Side side) external view returns (order[] memory) {
         return orders[side];
     }
 
-    function removeLiquidity() external returns (uint256 shares) {}
+    function balances(address account, address token) public view returns (uint256) {
+        return _balances[account][IERC20(token)];
+    }
 
     function _mint(address sender, IERC20 token, uint256 amount) private {
-        balances[sender][token] += amount;
+        _balances[sender][token] += amount;
+        if (token == _token0) {
+            reserves0 += amount;
+        }
+        if (token == _token1) {
+            reserves1 += amount;
+        }
     }
 
     function _burn(address sender, IERC20 token, uint256 amount) private {
-        balances[sender][token] -= amount;
+        _balances[sender][token] -= amount;
+        if (token == _token0) {
+            reserves0 -= amount;
+        }
+        if (token == _token1) {
+            reserves1 -= amount;
+        }
         token.transfer(sender, amount);
-    }
-
-    function _update() private {
-        reserves0 = _token0.balanceOf(address(this));
-        reserves1 = _token1.balanceOf(address(this));
     }
 
     function _cleanUp(order[] storage _orders) private {

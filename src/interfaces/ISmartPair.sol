@@ -26,7 +26,8 @@ interface ISmartPair {
     function reserves0() external view returns (uint256);
     function reserves1() external view returns (uint256);
     function swap(bool token0In, uint256 dx) external returns (uint256 dy);
-    function addLiquidity(bool isToken0, uint256 amount) external returns (uint256 shares);
+    function addLiquidity(bool isToken0, uint256 amount, address to) external returns (uint256 shares);
     function orderBook(Side side) external view returns (order[] memory);
     function removeLiquidity() external returns (uint256 shares);
+    function balances(address account, address token) external view returns (uint256);
 }

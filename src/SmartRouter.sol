@@ -25,7 +25,7 @@ contract SmartRouter {
         token.transferFrom(msg.sender, address(this), amount);
         token.approve(address(pair), amount);
         bool isToken0 = token0 == pair.token0() ? depositToken0 : !depositToken0;
-        uint256 shares = pair.addLiquidity(isToken0, amount);
+        uint256 shares = pair.addLiquidity(isToken0, amount, msg.sender);
         require(shares >= minShares, "s<minS");
         return shares;
     }
